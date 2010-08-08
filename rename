@@ -1,0 +1,82 @@
+#!/usr/bin/perl
+#
+# renames files according to a perl expression
+#
+# 2007-03-13 david@bushong.net
+#
+# e.g.: rename 's/\.bak$//' *.bak           # strips the .bak off all .bak files
+#       rename 's/\d+$/$&+1/e' messages.*   # incremements numeric suffixes
+#       rename '$_ .= "-" . time()' log*    # adds -seconds-since-epoch to files
+#
+
+use File::Basename;
+use Getopt::Std;
+use strict;
+
+## argument handling
+my %opt;
+getopts('hvnc', \%opt);
+my $prog = basename($0);
+
+die <<EOF if $opt{h} || @ARGV < 2;
+usage: $prog [-n | -v] 'perl expr' filename [filename2 [...]]
+       -v: verbose
+       -n: dry run; implies -v
+       -c: confirm; does a dry run, prompts for confirmation, then does for real
+EOF
+$opt{n} = 1 if $opt{c};
+$opt{v} = 1 if $opt{n};
+
+## grab expression
+my $expr = shift;
+
+## pass 1: validate and build hash
+my (@items, %exist);
+for (@ARGV) {
+  next unless -e;
+  push(@items, $_);
+  $exist{$_} = 1;
+}
+
+## pass 2: rename
+my (@tmp, @final);
+for (@items) {
+  ## do substitution
+  my $old = $_;
+  eval $expr;
+  my $new = $_;
+
+  if ($new ne $old) {
+    ## find conflicts
+    if ($exist{$new}) {
+      my $i = 0;
+      $i++ while -e "$new.rename.$i";
+      push(@tmp,  "$new.rename.$i");
+      push(@final, $new);
+      $new = "$new.rename.$i";
+    }
+
+    do_rename($old, $new);
+  }
+
+  delete $exist{$old};
+}
+
+## pass 3: cleanup
+while (@tmp) {
+  do_rename(shift(@tmp), shift(@final));
+}
+
+## pass 4: confirm and perform for real
+if ($opt{c}) {
+  $| = 1;
+  print "Perform renames? [Y/n] ";
+  my $yn = <STDIN>;
+  exec($0, $expr, @ARGV) unless $yn =~ /n/i;
+}
+
+sub do_rename {
+  my ($old, $new) = @_;
+  print "$old -> $new\n" if $opt{v};
+  rename($old, $new) unless $opt{n};
+}
